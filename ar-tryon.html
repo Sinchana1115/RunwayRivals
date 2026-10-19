@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Runway Rivals AR try-on</title>
+<style>
+body{margin:0;background:#1c1030;color:#fff1f8;font:600 16px system-ui,sans-serif;text-align:center}
+#wrap{position:relative;display:inline-block;max-width:100%;transform:scaleX(-1)}
+video,canvas{display:block;max-width:100%;max-height:70vh}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+.row{display:flex;gap:8px;overflow-x:auto;padding:8px}
+.row img{height:90px;border:3px solid transparent;border-radius:12px;background:#fff;cursor:pointer}
+.row img.on{border-color:#ff3d8b}
+button{font:800 16px system-ui;padding:10px 20px;border-radius:99px;border:0;background:#ff3d8b;color:#fff;cursor:pointer}
+</style></head><body>
+<h2>AR try-on</h2>
+<p id="msg">Press start and allow the camera. Stand back so your whole body is in view.</p>
+<button id="go">Start camera</button>
+<div id="wrap"><video id="v" playsinline muted></video><canvas id="c"></canvas></div>
+<h3>Dresses</h3><div class="row" id="dr"></div>
+<h3>Shoes</h3><div class="row" id="sh"></div>
+<script type="module">
+import {PoseLandmarker,FilesetResolver} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+const $=s=>document.querySelector(s),v=$('#v'),c=$('#c'),x=c.getContext('2d');
+const sel={dr:null,sh:null};
+const load=src=>{const i=new Image();i.crossOrigin='anonymous';i.src=src;return i};
+async function items(cat,box,key){
+  const r=await fetch('https://dummyjson.com/products/category/'+cat+'?limit=12');
+  (await r.json()).products.forEach((p,n)=>{
+    const im=new Image();im.src=p.thumbnail;im.title=p.title;
+    im.onclick=()=>{box.querySelectorAll('img').forEach(e=>e.classList.remove('on'));im.classList.add('on');sel[key]=load(p.thumbnail)};
+    box.append(im);if(!n)im.click()});
+}
+items('womens-dresses',$('#dr'),'dr').catch(()=>$('#msg').textContent='Could not reach dummyjson.com. Check your internet.');
+items('womens-shoes',$('#sh'),'sh').catch(()=>{});
+$('#go').onclick=async()=>{
+  $('#msg').textContent='Loading pose model...';
+  const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+  const pose=await PoseLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"},runningMode:"VIDEO",numPoses:1});
+  v.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+  await v.play();c.width=v.videoWidth;c.height=v.videoHeight;$('#msg').textContent='Pick a dress and shoes below.';
+  const W=c.width,H=c.height;
+  (function tick(){
+    x.clearRect(0,0,W,H);
+    const r=pose.detectForVideo(v,performance.now()),L=r.landmarks[0];
+    if(L){
+      const P=i=>({x:L[i].x*W,y:L[i].y*H}),ls=P(11),rs=P(12),lh=P(23),rh=P(24),la=P(27),ra=P(28);
+      const cx=(ls.x+rs.x)/2,sw=Math.abs(ls.x-rs.x),top=(ls.y+rs.y)/2,hip=(lh.y+rh.y)/2;
+      x.globalCompositeOperation='multiply'; // hides the white product-photo background
+      if(sel.dr&&sel.dr.complete){const w=sw*2.4,h=(hip-top)*2.6;x.drawImage(sel.dr,cx-w/2,top-h*.08,w,h)}
+      if(sel.sh&&sel.sh.complete){const w=sw*.9,h=w;[la,ra].forEach(a=>x.drawImage(sel.sh,a.x-w/2,a.y-h*.35,w,h))}
+      x.globalCompositeOperation='source-over';
+    }
+    requestAnimationFrame(tick)})();
+};
+</script></body></html>
